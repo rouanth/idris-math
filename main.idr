@@ -95,3 +95,23 @@ eval (EMult  a b {n} {k}) v = let (x1 ** v1) = nMaxLemma1 v
 eval (EDiv   a b {n} {k}) v = let (x1 ** v1) = nMaxLemma1 v
                                   (x2 ** v2) = nMaxLemma2 v
     in eval a (take {m = x1} n v1) / eval b (take {m = x2} k v2)
+
+evalFn : (m : Nat) -> Type
+evalFn Z = Ratio
+evalFn (S n) = Ratio -> evalFn n
+
+minusSuccNSucc : (n : Nat) -> (m : Nat) ->
+    {auto ok1 : (m `LT` n)} ->
+    {auto ok2 : (m `LTE` n)} -> n - m = S (n - S m)
+minusSuccNSucc Z _ {ok1} = void (succNotLTEzero ok1)
+minusSuccNSucc (S n) Z = rewrite minusSuccOne n in Refl
+minusSuccNSucc (S n) (S m) {ok1} {ok2} = minusSuccNSucc n m
+    {ok1 = fromLteSucc ok1} {ok2 = fromLteSucc ok2}
+
+eval' : (e : Expr m) -> evalFn m
+eval' e {m} = evalIn' m (rewrite sym (minusZeroN m) in []) {ok=lteRefl}
+    where evalIn' : (a : Nat) -> {auto ok : a `LTE` m} -> Vect (m-a) Ratio ->
+                    evalFn a
+          evalIn' Z v = eval e (rewrite sym (minusZeroRight m) in v)
+          evalIn' (S a) v {ok} = \n => evalIn' a (rewrite minusSuccNSucc
+              {ok2 = lteSuccLeft ok} m a in (n :: v)) {ok = lteSuccLeft ok}
