@@ -43,6 +43,24 @@ data Expr : Nat -> Type where
     EConst : Ratio  -> Expr 0
     EVar   : (n : Nat) -> Expr (S n)
 
+(+) : Expr n -> Expr m -> Expr (nMax n m)
+(+) = EPlus
+
+(-) : Expr n -> Expr m -> Expr (nMax n m)
+(-) = EMinus
+
+(*) : Expr n -> Expr m -> Expr (nMax n m)
+(*) = EMult
+
+(/) : Expr n -> Expr m -> Expr (nMax n m)
+(/) = EDiv
+
+c : Ratio -> Expr 0
+c = EConst
+
+v : (n : Nat) -> Expr (S n)
+v = EVar
+
 nMaxIsAddition : (n : Nat) -> (k : Nat) -> (m ** n + m = nMax n k)
 nMaxIsAddition Z Z = (_ ** Refl)
 nMaxIsAddition Z (S m) = (_ ** Refl)
