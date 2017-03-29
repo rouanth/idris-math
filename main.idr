@@ -1,5 +1,7 @@
 import Data.Vect
 
+%default total
+
 data Ratio = MkRatio Integer Nat
 
 sgn : (Ord a, Neg a, Num a) => a -> a
