@@ -132,3 +132,38 @@ eval' e {m} = evalIn' m (rewrite sym (minusZeroN m) in []) {ok=lteRefl}
           evalIn' Z v = eval e (rewrite sym (minusZeroRight m) in v)
           evalIn' (S a) v {ok} = \n => evalIn' a (rewrite minusSuccNSucc
               {ok2 = lteSuccLeft ok} m a in (n :: v)) {ok = lteSuccLeft ok}
+
+data Lexeme = OpBrac
+            | ClBrac
+            | Comma
+            | Plus
+            | Minus
+            | Slash
+            | Asterisk
+            | Equals
+            | Apostrophe
+            | Newline
+            | Number Int
+            | Identifier String
+
+lexer : List Char -> List Lexeme
+lexer [] = []
+lexer xss@(x::xs) = case special x of
+        Just a => a :: lexer xs
+        Nothing => if isSpace x then lexer xs
+        else if isDigit x then let (cr, rs) = break (not . isDigit) xss
+              in Number (cast (pack cr)) :: lexer (assert_smaller xss rs)
+        else let (cr, rs) = break (\x => isSpace x || isJust (special x)) xss
+              in Identifier (pack cr) :: lexer (assert_smaller xss rs)
+    where special : Char -> Maybe Lexeme
+          special = flip List.lookup [
+                        ('(', OpBrac),
+                        (')', ClBrac),
+                        (',', Comma),
+                        ('+', Plus),
+                        ('-', Minus),
+                        ('/', Slash),
+                        ('*', Asterisk),
+                        ('=', Equals),
+                        ('\'', Apostrophe),
+                        ('\n', Newline)]
