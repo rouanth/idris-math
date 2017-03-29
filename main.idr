@@ -50,6 +50,7 @@ data Expr : Nat -> Type where
     EVar   : (n : Nat) -> Expr (S n)
     ESubExp: Expr n -> (p : Vect n (k ** Expr k)) ->
                  Expr ((nFold Main.nMax Z . map DPair.fst) p)
+    EId    : String -> (n : Nat) -> Expr n
 
 (+) : Expr n -> Expr m -> Expr (nMax n m)
 (+) = EPlus
@@ -68,6 +69,16 @@ c = EConst
 
 v : (n : Nat) -> Expr (S n)
 v = EVar
+
+data ContextFree : Expr n -> Type where
+    CFConst : ContextFree (EConst r)
+    CFVar   : ContextFree (EVar v)
+    CFPlus  : ContextFree a -> ContextFree b -> ContextFree (EPlus  a b)
+    CFMinus : ContextFree a -> ContextFree b -> ContextFree (EMinus a b)
+    CFMult  : ContextFree a -> ContextFree b -> ContextFree (EMult  a b)
+    CFDiv   : ContextFree a -> ContextFree b -> ContextFree (EDiv   a b)
+    CFSExp  : ContextFree b -> (p : Vect n (k ** z : Expr k ** ContextFree z))
+                            -> ContextFree (ESubExp b (map fst p))
 
 nMaxIsAddition : (n : Nat) -> (k : Nat) -> (m ** n + m = nMax n k)
 nMaxIsAddition Z _ = (_ ** Refl)
@@ -100,6 +111,7 @@ eval g@(ESubExp b p {n}) v = eval b (map (f n p v) range)
         f Z _ _ _ impossible
         f (S n) ((k ** z) :: ps) xs FZ = eval z (nMaxLemma1 xs)
         f (S n) (p :: ps) xs (FS b) = f n ps (nMaxLemma2 xs) b
+eval (EId _ _) _ = 0
 
 evalFn : (m : Nat) -> Type
 evalFn Z = Ratio
