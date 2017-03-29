@@ -35,6 +35,10 @@ nMaxCommutative Z (S m) = Refl
 nMaxCommutative (S n) Z = Refl
 nMaxCommutative (S n) (S m) = cong (nMaxCommutative n m)
 
+nFold : (t -> a -> a) -> a -> Vect n t -> a
+nFold f a [] = a
+nFold f a (x :: xs) = f x (nFold f a xs)
+
 data Expr : Nat -> Type where
     EPlus  : Expr n -> Expr k -> Expr (nMax n k)
     EMinus : Expr n -> Expr k -> Expr (nMax n k)
@@ -42,6 +46,8 @@ data Expr : Nat -> Type where
     EDiv   : Expr n -> Expr k -> Expr (nMax n k)
     EConst : Ratio  -> Expr 0
     EVar   : (n : Nat) -> Expr (S n)
+    ESubExp: Expr n -> (p : Vect n (k ** Expr k)) ->
+                 Expr ((nFold Main.nMax Z . map DPair.fst) p)
 
 (+) : Expr n -> Expr m -> Expr (nMax n m)
 (+) = EPlus
@@ -80,6 +86,13 @@ natToFin' : (k : Nat) -> (n : Nat) -> {auto ok : k `LT` n} -> Fin n
 natToFin' Z (S n) = FZ
 natToFin' (S k) (S n) {ok} = FS (natToFin' k n {ok = fromLteSucc ok})
 
+evalSubExpLemma : (k : Nat) -> (z : Expr k) ->
+    (ps : Vect n (o : Nat ** Expr o)) ->
+    (m ** k + m = (nFold Main.nMax 0 . map DPair.fst) ((k ** z) :: ps))
+evalSubExpLemma k z ps =
+    let (m ** pf) = nMaxIsAddition k ((nFold nMax 0 . map DPair.fst) ps)
+     in (m ** rewrite pf in Refl)
+
 eval : Expr m -> Vect m Ratio -> Ratio
 eval (EConst c)   _ = c
 eval (EVar n)     v = natToFin' n (S n) {ok = lteRefl} `index` v
@@ -95,6 +108,22 @@ eval (EMult  a b {n} {k}) v = let (x1 ** v1) = nMaxLemma1 v
 eval (EDiv   a b {n} {k}) v = let (x1 ** v1) = nMaxLemma1 v
                                   (x2 ** v2) = nMaxLemma2 v
     in eval a (take {m = x1} n v1) / eval b (take {m = x2} k v2)
+eval (ESubExp b p {n}) v = let params = map (g . f n p v) (range {len = n})
+                            in eval b params
+  where f : (n : Nat) ->
+            (p : Vect n (k ** Expr k)) ->
+            Vect ((nFold Main.nMax Z . map DPair.fst) p) Ratio ->
+            Fin n ->
+            (k ** m ** (Expr k, Vect (k + m) Ratio))
+        f Z _ _ _ impossible
+        f (S n) ((k ** z) :: ps) xs FS = let (m ** pf) = evalSubExpLemma k z ps
+            in (k ** m ** rewrite pf in (z, xs))
+        f (S n) ((kn ** zn) :: ps) xs (FS b) =
+            let (i ** s) = nMaxLemma2 xs
+                nxs = Vect.take (((nFold nMax Z . map DPair.fst) ps)) {m = i} s
+            in f n ps nxs b
+        g : (k ** m ** (Expr k, Vect (k + m) Ratio)) -> Ratio
+        g (k ** _ ** (z, xs)) = eval z (take k xs)
 
 evalFn : (m : Nat) -> Type
 evalFn Z = Ratio
