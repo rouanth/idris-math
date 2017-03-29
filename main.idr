@@ -167,3 +167,21 @@ lexer xss@(x::xs) = case special x of
                         ('=', Equals),
                         ('\'', Apostrophe),
                         ('\n', Newline)]
+
+data Parser a = MkParser (List Lexeme -> List (a, List Lexeme))
+
+Functor Parser where
+    map f (MkParser g) = MkParser (map (\(a, ns) => (f a, ns)) . g)
+
+Applicative Parser where
+    pure a = MkParser (\s => [(a, s)])
+    (MkParser ab) <*> (MkParser a) = MkParser (
+        concatMap (\(f, ns) => map (\(b, nns) => (f b, nns)) (a ns)) . ab)
+
+Monad Parser where
+    (MkParser a) >>= f = MkParser (
+        concatMap (\(as, ns) => let MkParser b = f as in b ns) . a)
+
+Alternative Parser where
+    empty = MkParser (const [])
+    (MkParser a) <|> (MkParser b) = MkParser (\s => a s ++ b s)
