@@ -41,6 +41,11 @@ nFold : (t -> a -> a) -> a -> Vect n t -> a
 nFold f a [] = a
 nFold f a (x :: xs) = f x (nFold f a xs)
 
+toVect : List a -> (n ** Vect n a)
+toVect [] = (_ ** [])
+toVect (x :: xs) = let (n ** v) = toVect xs
+                    in (S n ** x :: v)
+
 data Expr : Nat -> Type where
     EPlus  : Expr n -> Expr k -> Expr (nMax n k)
     EMinus : Expr n -> Expr k -> Expr (nMax n k)
@@ -183,7 +188,7 @@ lexer xss@(x::xs) = case special x of
                         ('\'', Apostrophe),
                         ('\n', Newline)]
 
-data Parser a = MkParser (List Lexeme -> List (a, List Lexeme))
+data Parser a = MkParser (List Lexeme -> (List (a, List Lexeme)))
 
 Functor Parser where
     map f (MkParser g) = MkParser (map (\(a, ns) => (f a, ns)) . g)
@@ -199,7 +204,8 @@ Monad Parser where
 
 Alternative Parser where
     empty = MkParser (const [])
-    (MkParser a) <|> (MkParser b) = MkParser (\s => a s ++ b s)
+    (MkParser a) <|> (MkParser b) = MkParser (\s =>
+        let as = a s in if isNil as then b s else a s)
 
 parse : Parser a -> List Lexeme -> List a
 parse (MkParser f) = map fst . filter (isNil . snd) . f
@@ -209,8 +215,8 @@ expectImpl f = MkParser (\s => case s of
     [] => []
     (x :: xs) => map (\a => (a, xs)) (toList (f x)))
 
-expect : Lexeme -> Parser ()
-expect a = expectImpl (\x => if x == a then Just () else Nothing)
+expect : Lexeme -> Parser Lexeme
+expect a = expectImpl (\x => if x == a then Just x else Nothing)
 
 some : Parser a -> Parser (List a)
 some (MkParser f) = MkParser g
@@ -227,6 +233,10 @@ many p = let MkParser f = some p in MkParser (g . f)
           g (([], lex)::as) = g as
           g (((x :: xs), lex)::as) = (((x :: xs) ** IsNonEmpty), lex) :: g as
 
+maybe : Parser a -> Parser (Maybe a)
+maybe (MkParser f) = MkParser (\s =>
+    (Nothing, s) :: map (\(a, ns) => (Just a, ns)) (f s))
+
 p_number : Parser Integer
 p_number = expectImpl (\x => case x of
     Number n => Just n
@@ -236,3 +246,36 @@ p_identifier : Parser String
 p_identifier = expectImpl (\x => case x of
     Identifier i => Just i
     _ => Nothing)
+
+p_commasep : Parser a -> Parser (l : List a ** NonEmpty l)
+p_commasep p = f <$> some (p <* expect Comma) <*> p
+  where f : List a -> a -> (l: List a ** NonEmpty l)
+        f as a = (a :: as ** IsNonEmpty)
+
+-- Idris fails if it's not a separate function
+wtf : List (n ** Expr n) -> (m ** Vect m (n ** Expr n))
+wtf l = toVect l
+
+p_expr : Parser (n ** Expr n)
+p_expr = (econstp <$> (maybe (expect Plus) *> p_number))
+     <|> (econstm <$> (expect Minus *> p_number))
+     <|> (eid <$> p_identifier <*> maybe (expect OpBrac *>
+         p_commasep p_expr <* expect ClBrac))
+     <|> (expect OpBrac *> p_expr <* expect ClBrac)
+     <|> (eop <$> p_expr <*>
+         (expect Plus <|> expect Minus <|> expect Slash <|> expect Asterisk) <*>
+         p_expr)
+    where econstp s = (_ ** EConst (fromInteger s))
+          econstm s = (_ ** EConst (fromInteger (-s)))
+          eid s ps = case ps of
+              Nothing => (_ ** EId s 0)
+              Just (l ** _) => let (n ** v) = wtf l
+                               in (_ ** ESubExp (EId s n) v)
+          eop e1 op e2 = let (e1n ** e1') = e1
+                             (e2n ** e2') = e2
+                          in case op of
+                              Plus => (_ ** EPlus e1' e2')
+                              Minus => (_ ** EMinus e1' e2')
+                              Asterisk => (_ ** EMult e1' e2')
+                              Slash => (_ ** EDiv e1' e2')
+                              _ => (_ ** EId "" 0)
