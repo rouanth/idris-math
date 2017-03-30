@@ -204,11 +204,13 @@ Monad Parser where
 
 Alternative Parser where
     empty = MkParser (const [])
-    (MkParser a) <|> (MkParser b) = MkParser (\s =>
-        let as = a s in if isNil as then b s else a s)
+    (MkParser a) <|> (MkParser b) = MkParser (\s => a s ++ b s)
 
 parse : Parser a -> List Lexeme -> List a
 parse (MkParser f) = map fst . filter (isNil . snd) . f
+
+parse' : Parser a -> List Lexeme -> List (a, List Lexeme)
+parse' (MkParser p) s = p s
 
 expectImpl : (Lexeme -> Maybe a) -> Parser a
 expectImpl f = MkParser (\s => case s of
@@ -256,26 +258,45 @@ p_commasep p = f <$> some (p <* expect Comma) <*> p
 wtf : List (n ** Expr n) -> (m ** Vect m (n ** Expr n))
 wtf l = toVect l
 
+p_fin : Parser ()
+p_fin = MkParser (\s => case s of
+    [] => [((), [])]
+    _  => [])
+
+econstp : Integer -> (n ** Expr n)
+econstp s = (_ ** EConst (fromInteger s))
+
+econstm : Integer -> (n ** Expr n)
+econstm s = (_ ** EConst (fromInteger (-s)))
+
+eid : String -> Maybe (l : List (n ** Expr n) ** NonEmpty l) -> (n ** Expr n)
+eid s ps = case ps of
+    Nothing => (_ ** EId s 0)
+    Just (l ** _) => let (n ** v) = wtf l
+                     in (_ ** ESubExp (EId s n) v)
+
+eop : (n ** Expr n) -> Lexeme -> (m ** Expr m) -> (a ** Expr a)
+eop e1 op e2 = let (e1n ** e1') = e1
+                   (e2n ** e2') = e2
+                in case op of
+                    Plus => (_ ** EPlus e1' e2')
+                    Minus => (_ ** EMinus e1' e2')
+                    Asterisk => (_ ** EMult e1' e2')
+                    Slash => (_ ** EDiv e1' e2')
+                    _ => (_ ** EId "" 0)
+
 p_expr : Parser (n ** Expr n)
-p_expr = (econstp <$> (maybe (expect Plus) *> p_number))
-     <|> (econstm <$> (expect Minus *> p_number))
-     <|> (eid <$> p_identifier <*> maybe (expect OpBrac *>
-         p_commasep p_expr <* expect ClBrac))
+p_expr = (eop <$> p_expr2 <*> (expect Plus <|> expect Minus) <*>
+                             p_expr)
      <|> (expect OpBrac *> p_expr <* expect ClBrac)
-     <|> (eop <$> p_expr <*>
-         (expect Plus <|> expect Minus <|> expect Slash <|> expect Asterisk) <*>
-         p_expr)
-    where econstp s = (_ ** EConst (fromInteger s))
-          econstm s = (_ ** EConst (fromInteger (-s)))
-          eid s ps = case ps of
-              Nothing => (_ ** EId s 0)
-              Just (l ** _) => let (n ** v) = wtf l
-                               in (_ ** ESubExp (EId s n) v)
-          eop e1 op e2 = let (e1n ** e1') = e1
-                             (e2n ** e2') = e2
-                          in case op of
-                              Plus => (_ ** EPlus e1' e2')
-                              Minus => (_ ** EMinus e1' e2')
-                              Asterisk => (_ ** EMult e1' e2')
-                              Slash => (_ ** EDiv e1' e2')
-                              _ => (_ ** EId "" 0)
+     <|> p_expr2
+    where aexpr : Parser (n ** Expr n)
+          aexpr = (econstp <$> (maybe (expect Plus) *> p_number))
+              <|> (econstm <$> (expect Minus *> p_number))
+              <|> (eid <$> p_identifier <*> maybe (expect OpBrac *>
+                  p_commasep p_expr <* expect ClBrac))
+              <|> (expect OpBrac *> aexpr <* expect ClBrac)
+          p_expr2 = (eop <$> aexpr <*> expect Asterisk <*> p_expr2)
+                <|> (eop <$> aexpr <*> expect Slash <*> aexpr)
+                <|> (expect OpBrac *> p_expr <* expect ClBrac)
+                <|> aexpr
