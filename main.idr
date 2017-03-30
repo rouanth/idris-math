@@ -143,8 +143,23 @@ data Lexeme = OpBrac
             | Equals
             | Apostrophe
             | Newline
-            | Number Int
+            | Number Integer
             | Identifier String
+
+Eq Lexeme where
+  OpBrac          == OpBrac          = True
+  ClBrac          == ClBrac          = True
+  Comma           == Comma           = True
+  Plus            == Plus            = True
+  Minus           == Minus           = True
+  Slash           == Slash           = True
+  Asterisk        == Asterisk        = True
+  Equals          == Equals          = True
+  Apostrophe      == Apostrophe      = True
+  Newline         == Newline         = True
+  (Number n1)     == (Number n2)     = n1 == n2
+  (Identifier s1) == (Identifier s2) = s1 == s2
+  _               == _               = False
 
 lexer : List Char -> List Lexeme
 lexer [] = []
@@ -185,3 +200,39 @@ Monad Parser where
 Alternative Parser where
     empty = MkParser (const [])
     (MkParser a) <|> (MkParser b) = MkParser (\s => a s ++ b s)
+
+parse : Parser a -> List Lexeme -> List a
+parse (MkParser f) = map fst . filter (isNil . snd) . f
+
+expectImpl : (Lexeme -> Maybe a) -> Parser a
+expectImpl f = MkParser (\s => case s of
+    [] => []
+    (x :: xs) => map (\a => (a, xs)) (toList (f x)))
+
+expect : Lexeme -> Parser ()
+expect a = expectImpl (\x => if x == a then Just () else Nothing)
+
+some : Parser a -> Parser (List a)
+some (MkParser f) = MkParser g
+    where g : List Lexeme -> List (List a, List Lexeme)
+          g xs = ([], xs) :: concatMap (\(c, ns) =>
+                  map (\(cn, nns) => (c :: cn, nns)) (g (assert_smaller xs ns)))
+                  (f xs)
+
+many : Parser a -> Parser (l : List a ** NonEmpty l)
+many p = let MkParser f = some p in MkParser (g . f)
+    where g : List (List a, List Lexeme)
+              -> List ((l : List a ** NonEmpty l), List Lexeme)
+          g [] = []
+          g (([], lex)::as) = g as
+          g (((x :: xs), lex)::as) = (((x :: xs) ** IsNonEmpty), lex) :: g as
+
+p_number : Parser Integer
+p_number = expectImpl (\x => case x of
+    Number n => Just n
+    _ => Nothing)
+
+p_identifier : Parser String
+p_identifier = expectImpl (\x => case x of
+    Identifier i => Just i
+    _ => Nothing)
