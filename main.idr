@@ -190,13 +190,17 @@ lexer xss@(x::xs) = case special x of
 
 data Parser a = MkParser (List Lexeme -> (List (a, List Lexeme)))
 
+parse' : Parser a -> List Lexeme -> List (a, List Lexeme)
+parse' (MkParser p) s = p s
+
 Functor Parser where
     map f (MkParser g) = MkParser (map (\(a, ns) => (f a, ns)) . g)
 
 Applicative Parser where
     pure a = MkParser (\s => [(a, s)])
-    (MkParser ab) <*> (MkParser a) = MkParser (
-        concatMap (\(f, ns) => map (\(b, nns) => (f b, nns)) (a ns)) . ab)
+    ab <*> a = MkParser (
+        concatMap (\(f, ns) => map (\(b, nns) => (f b, nns)) (parse' a ns)) .
+        parse' ab)
 
 Monad Parser where
     (MkParser a) >>= f = MkParser (
@@ -204,13 +208,10 @@ Monad Parser where
 
 Alternative Parser where
     empty = MkParser (const [])
-    (MkParser a) <|> (MkParser b) = MkParser (\s => a s ++ b s)
+    a <|> b = MkParser (\s => parse' a s ++ parse' b s)
 
 parse : Parser a -> List Lexeme -> List a
 parse (MkParser f) = map fst . filter (isNil . snd) . f
-
-parse' : Parser a -> List Lexeme -> List (a, List Lexeme)
-parse' (MkParser p) s = p s
 
 expectImpl : (Lexeme -> Maybe a) -> Parser a
 expectImpl f = MkParser (\s => case s of
@@ -298,5 +299,5 @@ p_expr = (eop <$> p_expr2 <*> (expect Plus <|> expect Minus) <*>
               <|> (expect OpBrac *> aexpr <* expect ClBrac)
           p_expr2 = (eop <$> aexpr <*> expect Asterisk <*> p_expr2)
                 <|> (eop <$> aexpr <*> expect Slash <*> aexpr)
-                <|> (expect OpBrac *> p_expr <* expect ClBrac)
+                <|> (expect OpBrac *> p_expr2 <* expect ClBrac)
                 <|> aexpr
