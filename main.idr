@@ -190,8 +190,7 @@ lexer xss@(x::xs) = case special x of
                         ('*', Asterisk),
                         ('=', Equals),
                         (';', Semicolon),
-                        ('\'', Apostrophe),
-                        ('\n', Newline)]
+                        ('\'', Apostrophe) ]
 
 data Parser a = MkParser (List Lexeme -> (List (a, List Lexeme)))
 
