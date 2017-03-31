@@ -320,3 +320,47 @@ p_stat = (sassign <$> p_identifier <*> p_parlist p_identifier <*>
     where sassign : String -> List String -> Expr 0 -> Statement
           sassign s p e = SAssign s (DPair.snd (toVect p)) e
 
+var_subst : Expr n -> String -> Expr m -> (k ** Expr k)
+var_subst e s (EConst c) = (_ ** EConst c)
+var_subst e s (EVar v)   = (_ ** EVar v)
+var_subst e s (ESubExp b p {n}) =
+      let (n' ** nb) = var_subst e s b
+          np = map (f e s) p
+       in case decEq (S n) n' of
+           Yes Refl => (_ ** ESubExp nb np)
+           No _ => (_ ** ESubExp b np)
+    where f : Expr m -> String -> (z ** Expr z) -> (k ** Expr k)
+          f e s (_ ** p) = var_subst e s p
+var_subst e {n} s (EId s2 n2) = if s == s2
+            then (n ** e)
+            else (_ ** EId s2 n2)
+var_subst e s (EPlus a1 a2) = let (k1 ** p1) = var_subst e s a1
+                                  (k2 ** p2) = var_subst e s a2
+                               in (_ ** EPlus p1 p2)
+var_subst e s (EMinus a1 a2) = let (k1 ** p1) = var_subst e s a1
+                                   (k2 ** p2) = var_subst e s a2
+                                in (_ ** EMinus p1 p2)
+var_subst e s (EMult a1 a2) = let (k1 ** p1) = var_subst e s a1
+                                  (k2 ** p2) = var_subst e s a2
+                               in (_ ** EMult p1 p2)
+var_subst e s (EDiv  a1 a2) = let (k1 ** p1) = var_subst e s a1
+                                  (k2 ** p2) = var_subst e s a2
+                               in (_ ** EDiv p1 p2)
+
+Context : Type
+Context = List (String, (n ** Expr n))
+
+mass_subst : Expr m -> Context -> (k ** Expr k)
+mass_subst e [] = (_ ** e)
+mass_subst e ((s, (_ ** e')) :: xs) = let (_ ** p) = var_subst e' s e
+                                       in mass_subst p xs
+
+step : Context -> Statement -> (Maybe Ratio, Context)
+step ctx (SAssign s v {n} e) =
+        let ctx' = toList (map (\(r, s) => (s, (_ ** EVar (finToNat r))))
+                                           (Vect.zip range v))
+         in (Nothing, (s, mass_subst e (ctx' ++ ctx)) :: ctx)
+step ctx (SEval e) = let (n ** e') = mass_subst e ctx
+                      in case n of
+                          Z => (Just (eval e' []), ctx)
+                          S n => (Nothing, ctx)
