@@ -53,7 +53,7 @@ data Expr : Nat -> Type where
     EDiv   : Expr n -> Expr k -> Expr (nMax n k)
     EConst : Ratio  -> Expr 0
     EVar   : (n : Nat) -> Expr (S n)
-    ESubExp: Expr n -> (p : Vect n (k ** Expr k)) ->
+    ESubExp: Expr (S n) -> (p : Vect (S n) (k ** Expr k)) ->
                  Expr ((nFold Main.nMax Z . map DPair.fst) p)
     EId    : String -> (n : Nat) -> Expr n
 
@@ -82,8 +82,9 @@ data ContextFree : Expr n -> Type where
     CFMinus : ContextFree a -> ContextFree b -> ContextFree (EMinus a b)
     CFMult  : ContextFree a -> ContextFree b -> ContextFree (EMult  a b)
     CFDiv   : ContextFree a -> ContextFree b -> ContextFree (EDiv   a b)
-    CFSExp  : ContextFree b -> (p : Vect n (k ** z : Expr k ** ContextFree z))
-                            -> ContextFree (ESubExp b (map fst p))
+    CFSExp  : ContextFree b ->
+              (p : Vect (S n) (k ** z : Expr k ** ContextFree z)) ->
+              ContextFree (ESubExp b (map fst p))
 
 nMaxIsAddition : (n : Nat) -> (k : Nat) -> (m ** n + m = nMax n k)
 nMaxIsAddition Z _ = (_ ** Refl)
@@ -106,16 +107,17 @@ natToFin' (S k) (S n) {ok} = FS (natToFin' k n {ok = fromLteSucc ok})
 eval : Expr m -> Vect m Ratio -> Ratio
 eval (EConst c)   _ = c
 eval (EVar n)     v = natToFin' n (S n) {ok = lteRefl} `index` v
-eval (EPlus  a b {n} {k}) v = eval a (nMaxLemma1 v) + eval b (nMaxLemma2 v)
-eval (EMult  a b {n} {k}) v = eval a (nMaxLemma1 v) * eval b (nMaxLemma2 v)
-eval (EDiv   a b {n} {k}) v = eval a (nMaxLemma1 v) / eval b (nMaxLemma2 v)
-eval (EMinus a b {n} {k}) v = eval a (nMaxLemma1 v) - eval b (nMaxLemma2 v)
-eval g@(ESubExp b p {n}) v = eval b (map (f n p v) range)
-  where f : (n : Nat) -> (p : Vect n (k ** Expr k)) ->
-            Vect ((nFold Main.nMax Z . map DPair.fst) p) Ratio -> Fin n -> Ratio
-        f Z _ _ _ impossible
-        f (S n) ((k ** z) :: ps) xs FZ = eval z (nMaxLemma1 xs)
-        f (S n) (p :: ps) xs (FS b) = f n ps (nMaxLemma2 xs) b
+eval (EPlus  a b) v = eval a (nMaxLemma1 v) + eval b (nMaxLemma2 v)
+eval (EMult  a b) v = eval a (nMaxLemma1 v) * eval b (nMaxLemma2 v)
+eval (EDiv   a b) v = eval a (nMaxLemma1 v) / eval b (nMaxLemma2 v)
+eval (EMinus a b) v = eval a (nMaxLemma1 v) - eval b (nMaxLemma2 v)
+eval g@(ESubExp b p {n}) v = eval (assert_smaller g b)
+    (map ((\(_ ** (z, xs)) => eval (assert_smaller g z) xs) . f n p v) range)
+  where f : (n : Nat) -> (p : Vect (S n) (k ** Expr k)) ->
+            Vect ((nFold Main.nMax Z . map DPair.fst) p) Ratio -> Fin (S n) ->
+            (k ** (Expr k, Vect k Ratio))
+        f _ ((_ ** z) :: ps) xs FZ = (_ ** (z, nMaxLemma1 xs))
+        f (S _) (_ :: ps) xs (FS b) = f _ ps (nMaxLemma2 xs) b
 eval (EId _ _) _ = 0
 
 evalFn : (m : Nat) -> Type
@@ -253,7 +255,14 @@ p_identifier = expectImpl (\x => case x of
 p_commasep : Parser a -> Parser (l : List a ** NonEmpty l)
 p_commasep p = f <$> some (p <* expect Comma) <*> p
   where f : List a -> a -> (l: List a ** NonEmpty l)
-        f as a = (a :: as ** IsNonEmpty)
+        f [] a = ([a] ** IsNonEmpty)
+        f (a::as) a' = (a :: (as ++ [a']) ** IsNonEmpty)
+
+p_parlist : Parser a -> Parser (List a)
+p_parlist p = f <$> Main.maybe (expect OpBrac *> p_commasep p <* expect ClBrac)
+    where f : Maybe (l : List a ** NonEmpty l) -> List a
+          f Nothing = []
+          f (Just (xs ** _)) = xs
 
 -- Idris fails if it's not a separate function
 wtf : List (n ** Expr n) -> (m ** Vect m (n ** Expr n))
@@ -270,11 +279,10 @@ econstp s = (_ ** EConst (fromInteger s))
 econstm : Integer -> (n ** Expr n)
 econstm s = (_ ** EConst (fromInteger (-s)))
 
-eid : String -> Maybe (l : List (n ** Expr n) ** NonEmpty l) -> (n ** Expr n)
-eid s ps = case ps of
-    Nothing => (_ ** EId s 0)
-    Just (l ** _) => let (n ** v) = wtf l
-                     in (_ ** ESubExp (EId s n) v)
+eid : String -> List (n ** Expr n) -> (n ** Expr n)
+eid s ps = case wtf ps of
+    (Z ** []) => (_ ** EId s Z)
+    (_ ** (x :: xs)) => (_ ** ESubExp (EId s _) (x :: xs))
 
 eop : (n ** Expr n) -> Lexeme -> (m ** Expr m) -> (a ** Expr a)
 eop e1 op e2 = let (e1n ** e1') = e1
@@ -287,15 +295,13 @@ eop e1 op e2 = let (e1n ** e1') = e1
                     _ => (_ ** EId "" 0)
 
 p_expr : Parser (n ** Expr n)
-p_expr = (eop <$> p_expr2 <*> (expect Plus <|> expect Minus) <*>
-                             p_expr)
+p_expr = (eop <$> p_expr2 <*> (expect Plus <|> expect Minus) <*> p_expr)
      <|> (expect OpBrac *> p_expr <* expect ClBrac)
      <|> p_expr2
     where aexpr : Parser (n ** Expr n)
           aexpr = (econstp <$> (maybe (expect Plus) *> p_number))
               <|> (econstm <$> (expect Minus *> p_number))
-              <|> (eid <$> p_identifier <*> maybe (expect OpBrac *>
-                  p_commasep p_expr <* expect ClBrac))
+              <|> (eid <$> p_identifier <*> p_parlist p_expr)
               <|> (expect OpBrac *> aexpr <* expect ClBrac)
           p_expr2 = (eop <$> aexpr <*> expect Asterisk <*> p_expr2)
                 <|> (eop <$> aexpr <*> expect Slash <*> aexpr)
