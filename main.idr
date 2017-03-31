@@ -264,41 +264,42 @@ p_parlist p = f <$> Main.maybe (expect OpBrac *> p_commasep p <* expect ClBrac)
           f Nothing = []
           f (Just (xs ** _)) = xs
 
--- Idris fails if it's not a separate function
-wtf : List (n ** Expr n) -> (m ** Vect m (n ** Expr n))
-wtf l = toVect l
-
 p_fin : Parser ()
 p_fin = MkParser (\s => case s of
     [] => [((), [])]
     _  => [])
 
-econstp : Integer -> (n ** Expr n)
-econstp s = (_ ** EConst (fromInteger s))
+econstp : Integer -> Expr 0
+econstp s = EConst (fromInteger s)
 
-econstm : Integer -> (n ** Expr n)
-econstm s = (_ ** EConst (fromInteger (-s)))
+econstm : Integer -> Expr 0
+econstm s = EConst (fromInteger (-s))
 
-eid : String -> List (n ** Expr n) -> (n ** Expr n)
-eid s ps = case wtf ps of
-    (Z ** []) => (_ ** EId s Z)
-    (_ ** (x :: xs)) => (_ ** ESubExp (EId s _) (x :: xs))
+eid : String -> List (Expr 0) -> Expr 0
+eid s ps = case toVect ps of
+        (Z ** []) => EId s Z
+        (S n ** (x :: xs)) => let k = map f (x :: xs)
+            in rewrite g (x :: xs) in (ESubExp (EId s (S n)) k)
+    where f : Expr 0 -> (n ** Expr n)
+          f e = (0 ** e)
+          g : (xss : Vect n (Expr 0)) ->
+              Z = nFold Main.nMax Z (map DPair.fst (map f xss))
+          g [] = Refl
+          g (x :: xs) = rewrite g xs in Refl
 
-eop : (n ** Expr n) -> Lexeme -> (m ** Expr m) -> (a ** Expr a)
-eop e1 op e2 = let (e1n ** e1') = e1
-                   (e2n ** e2') = e2
-                in case op of
-                    Plus => (_ ** EPlus e1' e2')
-                    Minus => (_ ** EMinus e1' e2')
-                    Asterisk => (_ ** EMult e1' e2')
-                    Slash => (_ ** EDiv e1' e2')
-                    _ => (_ ** EId "" 0)
+eop : Expr 0 -> Lexeme -> Expr 0 -> Expr 0
+eop e1 op e2 = case op of
+    Plus => EPlus e1 e2
+    Minus => EMinus e1 e2
+    Asterisk => EMult e1 e2
+    Slash => EDiv e1 e2
+    _ => EId "" 0
 
-p_expr : Parser (n ** Expr n)
+p_expr : Parser (Expr 0)
 p_expr = (eop <$> p_expr2 <*> (expect Plus <|> expect Minus) <*> p_expr)
      <|> (expect OpBrac *> p_expr <* expect ClBrac)
      <|> p_expr2
-    where aexpr : Parser (n ** Expr n)
+    where aexpr : Parser (Expr 0)
           aexpr = (econstp <$> (maybe (expect Plus) *> p_number))
               <|> (econstm <$> (expect Minus *> p_number))
               <|> (eid <$> p_identifier <*> p_parlist p_expr)
@@ -307,3 +308,15 @@ p_expr = (eop <$> p_expr2 <*> (expect Plus <|> expect Minus) <*> p_expr)
                 <|> (eop <$> aexpr <*> expect Slash <*> aexpr)
                 <|> (expect OpBrac *> p_expr2 <* expect ClBrac)
                 <|> aexpr
+
+data Statement : Type where
+    SAssign : String -> Vect n String -> Expr 0 -> Statement
+    SEval : Expr 0 -> Statement
+
+p_stat : Parser Statement
+p_stat = (sassign <$> p_identifier <*> p_parlist p_identifier <*>
+          (expect Equals *> p_expr))
+     <|> (SEval <$> p_expr)
+    where sassign : String -> List String -> Expr 0 -> Statement
+          sassign s p e = SAssign s (DPair.snd (toVect p)) e
+
