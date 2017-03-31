@@ -148,6 +148,7 @@ data Lexeme = OpBrac
             | Slash
             | Asterisk
             | Equals
+            | Semicolon
             | Apostrophe
             | Newline
             | Number Integer
@@ -164,6 +165,7 @@ Eq Lexeme where
   Equals          == Equals          = True
   Apostrophe      == Apostrophe      = True
   Newline         == Newline         = True
+  Semicolon       == Semicolon       = True
   (Number n1)     == (Number n2)     = n1 == n2
   (Identifier s1) == (Identifier s2) = s1 == s2
   _               == _               = False
@@ -187,6 +189,7 @@ lexer xss@(x::xs) = case special x of
                         ('/', Slash),
                         ('*', Asterisk),
                         ('=', Equals),
+                        (';', Semicolon),
                         ('\'', Apostrophe),
                         ('\n', Newline)]
 
@@ -252,11 +255,14 @@ p_identifier = expectImpl (\x => case x of
     Identifier i => Just i
     _ => Nothing)
 
+p_commasep_impl : Lexeme -> Parser a -> Parser (l : List a ** NonEmpty l)
+p_commasep_impl x p = f <$> some (p <* expect x) <*> p
+    where f : List a -> a -> (l: List a ** NonEmpty l)
+          f [] a = ([a] ** IsNonEmpty)
+          f (a::as) a' = (a :: (as ++ [a']) ** IsNonEmpty)
+
 p_commasep : Parser a -> Parser (l : List a ** NonEmpty l)
-p_commasep p = f <$> some (p <* expect Comma) <*> p
-  where f : List a -> a -> (l: List a ** NonEmpty l)
-        f [] a = ([a] ** IsNonEmpty)
-        f (a::as) a' = (a :: (as ++ [a']) ** IsNonEmpty)
+p_commasep = p_commasep_impl Comma
 
 p_parlist : Parser a -> Parser (List a)
 p_parlist p = f <$> Main.maybe (expect OpBrac *> p_commasep p <* expect ClBrac)
@@ -303,7 +309,7 @@ p_expr = (eop <$> p_expr2 <*> (expect Plus <|> expect Minus) <*> p_expr)
           aexpr = (econstp <$> (maybe (expect Plus) *> p_number))
               <|> (econstm <$> (expect Minus *> p_number))
               <|> (eid <$> p_identifier <*> p_parlist p_expr)
-              <|> (expect OpBrac *> aexpr <* expect ClBrac)
+              <|> (expect OpBrac *> p_expr <* expect ClBrac)
           p_expr2 = (eop <$> aexpr <*> expect Asterisk <*> p_expr2)
                 <|> (eop <$> aexpr <*> expect Slash <*> aexpr)
                 <|> (expect OpBrac *> p_expr2 <* expect ClBrac)
@@ -364,3 +370,18 @@ step ctx (SEval e) = let (n ** e') = mass_subst e ctx
                       in case n of
                           Z => (Just (eval e' []), ctx)
                           S n => (Nothing, ctx)
+
+p_prog : Parser (l : List Statement ** NonEmpty l)
+p_prog = p_commasep_impl Semicolon p_stat
+
+exec : List Statement -> List Ratio
+exec ls = catMaybes (exec' List.Nil ls)
+    where exec' : Context -> List Statement -> List (Maybe Ratio)
+          exec' _ [] = []
+          exec' ctx (x :: xs) = let (res, nctx) = step ctx x
+              in res :: exec' nctx xs
+
+run : String -> List Ratio
+run s = case (head' . parse p_prog . lexer . unpack) s of
+    Nothing => []
+    Just (a ** _) => exec a
